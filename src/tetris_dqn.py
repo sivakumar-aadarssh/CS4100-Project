@@ -41,7 +41,7 @@ class DQNConfig:
     eps_decay_steps: int = 200_000
 
     # target network
-    target_update_every: int = 2_000   # hard update every N gradient steps
+    target_update_every: int = 2_000   
 
     # reward shaping
     survival_bonus: float = 0.05
