@@ -1,10 +1,11 @@
 import time
 from tetris_gymnasium.envs.tetris import Tetris
 from state import extract_features
+import pygame
 from tetris_dqn import DQNAgent, DQNConfig, FeatureRewardWrapper, make_raw_env
 import torch
 
-def run_visual_demo(model_path="tetris_dqn.pt"):
+def run_visual_demo(model_path="src/tetris_dqn.pt"):
     # set up the environment and agent
     config = DQNConfig()
     raw_env = Tetris(render_mode="rgb_array")
