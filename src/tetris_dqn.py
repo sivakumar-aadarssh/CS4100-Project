@@ -121,8 +121,8 @@ def observation_to_features(obs):
     arr = np.asarray(obs)
 
     # If obs already looks like feature vector, use it directly.
-    if arr.ndim == 1 and arr.shape[0] >= 13:
-        return arr[:13].astype(np.float32)
+    if arr.ndim == 1 and arr.shape[0] >= 21:
+        return arr[:21].astype(np.float32)
 
     board = extract_board_from_observation(obs)
     if board is None:
@@ -153,11 +153,11 @@ class FeatureRewardWrapper(gym.Wrapper):
         self.config = config
         self.prev_features = None
 
-        # 10 heights + holes + bumpiness + max_height = 13
+        # 10 heights + holes + bumpiness + max_height = 21
         self.observation_space = gym.spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(13,),
+            shape=(21,),
             dtype=np.float32
         )
         self.action_space = gym.spaces.Discrete(NUM_ACTIONS)
@@ -271,7 +271,7 @@ class ReplayBuffer:
 # =========================================================
 
 class QNetwork(nn.Module):
-    def __init__(self, input_dim=13, num_actions=NUM_ACTIONS):
+    def __init__(self, input_dim=21, num_actions=NUM_ACTIONS):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, 256),
@@ -528,7 +528,7 @@ def run_reward_experiment(
 
 if __name__ == "__main__":
     config = DQNConfig(
-        episodes=1500,
+        episodes=5000,
         batch_size=256,
         buffer_size=100_000,
         min_replay_size=5_000,
