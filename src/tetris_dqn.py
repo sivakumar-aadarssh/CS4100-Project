@@ -25,33 +25,35 @@ from logger import TetrisLogger
 class DQNConfig:
     # training
     seed: int = 42
-    episodes: int = 1500
+    episodes: int = 5000
     max_steps_per_episode: int = 5000
-    batch_size: int = 256
-    buffer_size: int = 100_000
-    min_replay_size: int = 5_000
+    batch_size: int = 512
+    buffer_size: int = 200_000
+    min_replay_size: int = 10_000
     gamma: float = 0.99
-    lr: float = 1e-3
+    lr: float = 5e-4
     weight_decay: float = 1e-5
     grad_clip: float = 10.0
 
     # epsilon-greedy
     eps_start: float = 1.0
-    eps_end: float = 0.05
-    eps_decay_steps: int = 200_000
+    eps_end: float = 0.10
+    eps_decay_steps: int = 400_000
 
     # target network
-    target_update_every: int = 2_000   
+    target_update_every: int = 1_000
 
     # reward shaping
-    survival_bonus: float = 0.05
-    line_clear_rewards: tuple = (0.0, 10.0, 30.0, 60.0, 100.0)
-    hole_increase_penalty: float = 4.0
-    hole_reduction_bonus: float = 2.0
-    bumpiness_increase_penalty: float = 0.30
-    height_increase_penalty: float = 0.60
-    height_reduction_bonus: float = 0.15
-    game_over_penalty: float = 50.0
+    survival_bonus: float = 0.0
+    line_clear_rewards: tuple = (0.0, 40.0, 100.0, 300.0, 1200.0)
+    hole_increase_penalty: float = 8.0
+    hole_reduction_bonus: float = 0.0
+    bumpiness_increase_penalty: float = 1.5
+    height_increase_penalty: float = 2.0
+    height_reduction_bonus: float = 0.0
+    max_height_penalty: float = 0.5
+    do_nothing_penalty: float = 2.0
+    game_over_penalty: float = 200.0
 
     # save / eval
     model_path: str = "tetris_dqn.pt"
@@ -100,8 +102,7 @@ def extract_board_from_observation(obs):
     arr = np.asarray(obs)
 
     # If observation is already the handcrafted feature vector, return None.
-
-    if arr.ndim == 1:
+    if arr.ndim == 1 and arr.shape[0] == 13:
         return None
 
     if arr.ndim >= 2:
@@ -121,8 +122,8 @@ def observation_to_features(obs):
     arr = np.asarray(obs)
 
     # If obs already looks like feature vector, use it directly.
-    if arr.ndim == 1 and arr.shape[0] >= 21:
-        return arr[:21].astype(np.float32)
+    if arr.ndim == 1 and arr.shape[0] == 13:
+        return arr.astype(np.float32)
 
     board = extract_board_from_observation(obs)
     if board is None:
@@ -153,11 +154,11 @@ class FeatureRewardWrapper(gym.Wrapper):
         self.config = config
         self.prev_features = None
 
-        # 10 heights + holes + bumpiness + max_height = 21
+        # 10 heights + holes + bumpiness + max_height = 13
         self.observation_space = gym.spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(21,),
+            shape=(13,),
             dtype=np.float32
         )
         self.action_space = gym.spaces.Discrete(NUM_ACTIONS)
@@ -178,18 +179,20 @@ class FeatureRewardWrapper(gym.Wrapper):
             curr_features=features,
             lines_cleared=info.get("lines_cleared", 0),
             done=done,
+            action=action,
         )
 
         self.prev_features = features.copy()
         return features, reward, terminated, truncated, info
 
-    def compute_shaped_reward(self, prev_features, curr_features, lines_cleared, done):
+    def compute_shaped_reward(self, prev_features, curr_features, lines_cleared, done, action=None):
         """
         Reward design:
-        + reward line clears
-        - penalize making more holes
+        + strongly reward line clears
+        - strongly penalize making more holes
         - penalize increasing bumpiness / stack height
-        + small survival bonus
+        - penalize tall stacks in general
+        - penalize doing nothing
         - large game over penalty
         """
         prev_holes = float(prev_features[-3])
@@ -206,7 +209,7 @@ class FeatureRewardWrapper(gym.Wrapper):
         if 0 <= lines_cleared < len(self.config.line_clear_rewards):
             reward += self.config.line_clear_rewards[lines_cleared]
         else:
-            reward += 25.0 * (lines_cleared ** 2)
+            reward += 1200.0
 
         # holes
         hole_delta = curr_holes - prev_holes
@@ -226,6 +229,13 @@ class FeatureRewardWrapper(gym.Wrapper):
             reward -= self.config.height_increase_penalty * height_delta
         else:
             reward += self.config.height_reduction_bonus * abs(height_delta)
+
+        # penalize tall stacks in general
+        reward -= self.config.max_height_penalty * curr_max_height
+
+        # discourage do nothing
+        if action == 7:
+            reward -= self.config.do_nothing_penalty
 
         # game over
         if done:
@@ -271,7 +281,7 @@ class ReplayBuffer:
 # =========================================================
 
 class QNetwork(nn.Module):
-    def __init__(self, input_dim=21, num_actions=NUM_ACTIONS):
+    def __init__(self, input_dim=13, num_actions=NUM_ACTIONS):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, 256),
@@ -383,7 +393,7 @@ def evaluate_agent(agent: DQNAgent, config: DQNConfig, n_episodes=50):
     lines = []
     survivals = []
 
-    for _ in range(n_episodes):
+    for episode in range(n_episodes):
         state, _ = env.reset()
         done = False
         total_reward = 0.0
@@ -394,6 +404,11 @@ def evaluate_agent(agent: DQNAgent, config: DQNConfig, n_episodes=50):
             action = agent.select_action(state, global_step=10**12, greedy=True)
             next_state, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
+
+            # temporarily print the first few info dictionaries to verify the line-clear key
+            if episode == 0 and steps < 3:
+                print("Eval info keys:", info.keys())
+                print("Eval info:", info)
 
             total_reward += reward
             total_lines += info.get("lines_cleared", 0)
@@ -443,6 +458,11 @@ def train_dqn(config: DQNConfig):
             action = agent.select_action(state, global_step=global_step, greedy=False)
             next_state, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
+
+            # temporarily print the first few info dictionaries to verify the line-clear key
+            if episode == 1 and episode_steps < 5:
+                print("Train info keys:", info.keys())
+                print("Train info:", info)
 
             agent.replay.add(state, action, reward, next_state, done)
             loss = agent.update()
@@ -529,25 +549,27 @@ def run_reward_experiment(
 if __name__ == "__main__":
     config = DQNConfig(
         episodes=5000,
-        batch_size=256,
-        buffer_size=100_000,
-        min_replay_size=5_000,
+        batch_size=512,
+        buffer_size=200_000,
+        min_replay_size=10_000,
         gamma=0.99,
-        lr=1e-3,
+        lr=5e-4,
         eps_start=1.0,
-        eps_end=0.05,
-        eps_decay_steps=200_000,
-        target_update_every=2_000,
+        eps_end=0.10,
+        eps_decay_steps=400_000,
+        target_update_every=1_000,
 
         # reward design
-        survival_bonus=0.05,
-        line_clear_rewards=(0.0, 10.0, 30.0, 60.0, 100.0),
-        hole_increase_penalty=4.0,
-        hole_reduction_bonus=2.0,
-        bumpiness_increase_penalty=0.30,
-        height_increase_penalty=0.60,
-        height_reduction_bonus=0.15,
-        game_over_penalty=50.0,
+        survival_bonus=0.0,
+        line_clear_rewards=(0.0, 40.0, 100.0, 300.0, 1200.0),
+        hole_increase_penalty=8.0,
+        hole_reduction_bonus=0.0,
+        bumpiness_increase_penalty=1.5,
+        height_increase_penalty=2.0,
+        height_reduction_bonus=0.0,
+        max_height_penalty=0.5,
+        do_nothing_penalty=2.0,
+        game_over_penalty=200.0,
 
         model_path="tetris_dqn.pt",
         plot_path="training_curves.png",
