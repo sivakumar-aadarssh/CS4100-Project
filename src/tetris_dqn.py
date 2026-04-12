@@ -102,7 +102,7 @@ def extract_board_from_observation(obs):
     arr = np.asarray(obs)
 
     # If observation is already the handcrafted feature vector, return None.
-    if arr.ndim == 1 and arr.shape[0] == 13:
+    if arr.ndim == 1 and arr.shape[0] == 21:
         return None
 
     if arr.ndim >= 2:
@@ -122,7 +122,7 @@ def observation_to_features(obs):
     arr = np.asarray(obs)
 
     # If obs already looks like feature vector, use it directly.
-    if arr.ndim == 1 and arr.shape[0] == 13:
+    if arr.ndim == 1 and arr.shape[0] == 21:
         return arr.astype(np.float32)
 
     board = extract_board_from_observation(obs)
@@ -154,11 +154,11 @@ class FeatureRewardWrapper(gym.Wrapper):
         self.config = config
         self.prev_features = None
 
-        # 10 heights + holes + bumpiness + max_height = 13
+        # 10 heights + holes + bumpiness + max_height = 21
         self.observation_space = gym.spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(13,),
+            shape=(21,),
             dtype=np.float32
         )
         self.action_space = gym.spaces.Discrete(NUM_ACTIONS)
@@ -184,65 +184,29 @@ class FeatureRewardWrapper(gym.Wrapper):
 
         self.prev_features = features.copy()
         return features, reward, terminated, truncated, info
-
+    
     def compute_shaped_reward(self, prev_features, curr_features, lines_cleared, done, action=None):
-        """
-        Reward design:
-        + strongly reward line clears
-        - strongly penalize making more holes
-        - penalize increasing bumpiness / stack height
-        - penalize tall stacks in general
-        - penalize doing nothing
-        - large game over penalty
-        """
-        prev_holes = float(prev_features[-3])
-        prev_bumpiness = float(prev_features[-2])
-        prev_max_height = float(prev_features[-1])
+        reward = 0.0
 
+    # Primary reward: line clears (this is the main goal)
+        line_rewards = [0.0, 100.0, 300.0, 700.0, 1500.0]
+        reward += line_rewards[min(lines_cleared, 4)]
+
+    # Small penalty for holes only
         curr_holes = float(curr_features[-3])
-        curr_bumpiness = float(curr_features[-2])
-        curr_max_height = float(curr_features[-1])
-
-        reward = self.config.survival_bonus
-
-        # line clear reward
-        if 0 <= lines_cleared < len(self.config.line_clear_rewards):
-            reward += self.config.line_clear_rewards[lines_cleared]
-        else:
-            reward += 1200.0
-
-        # holes
+        prev_holes = float(prev_features[-3])
         hole_delta = curr_holes - prev_holes
-        if hole_delta > 0:
-            reward -= self.config.hole_increase_penalty * hole_delta
-        else:
-            reward += self.config.hole_reduction_bonus * abs(hole_delta)
+        reward -= 2.0 * hole_delta
 
-        # bumpiness
-        bump_delta = curr_bumpiness - prev_bumpiness
-        if bump_delta > 0:
-            reward -= self.config.bumpiness_increase_penalty * bump_delta
+    # Small penalty for height
+        curr_max_height = float(curr_features[-1])
+        reward -= 0.1 * curr_max_height
 
-        # stack height
-        height_delta = curr_max_height - prev_max_height
-        if height_delta > 0:
-            reward -= self.config.height_increase_penalty * height_delta
-        else:
-            reward += self.config.height_reduction_bonus * abs(height_delta)
-
-        # penalize tall stacks in general
-        reward -= self.config.max_height_penalty * curr_max_height
-
-        # discourage do nothing
-        if action == 7:
-            reward -= self.config.do_nothing_penalty
-
-        # game over
+    # Game over penalty
         if done:
-            reward -= self.config.game_over_penalty
+         reward -= 50.0
 
         return float(reward)
-
 
 # =========================================================
 # REPLAY BUFFER
@@ -281,7 +245,7 @@ class ReplayBuffer:
 # =========================================================
 
 class QNetwork(nn.Module):
-    def __init__(self, input_dim=13, num_actions=NUM_ACTIONS):
+    def __init__(self, input_dim=21, num_actions=NUM_ACTIONS):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, 256),
@@ -548,7 +512,7 @@ def run_reward_experiment(
 
 if __name__ == "__main__":
     config = DQNConfig(
-        episodes=5000,
+        episodes=10000,
         batch_size=512,
         buffer_size=200_000,
         min_replay_size=10_000,
