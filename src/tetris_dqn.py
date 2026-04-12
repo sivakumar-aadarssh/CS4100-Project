@@ -17,9 +17,8 @@ from state import extract_features
 from logger import TetrisLogger
 
 
-# =========================================================
+
 # CONFIG
-# =========================================================
 
 @dataclass
 class DQNConfig:
@@ -62,9 +61,8 @@ class DQNConfig:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-# =========================================================
 # ENV + STATE HANDLING
-# =========================================================
+
 
 NUM_ACTIONS = 8  # from your baseline file
 
@@ -208,9 +206,8 @@ class FeatureRewardWrapper(gym.Wrapper):
 
         return float(reward)
 
-# =========================================================
 # REPLAY BUFFER
-# =========================================================
+
 
 Transition = namedtuple(
     "Transition",
@@ -240,9 +237,9 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-# =========================================================
+
 # MODEL
-# =========================================================
+
 
 class QNetwork(nn.Module):
     def __init__(self, input_dim=21, num_actions=NUM_ACTIONS):
@@ -261,9 +258,9 @@ class QNetwork(nn.Module):
         return self.net(x)
 
 
-# =========================================================
+
 # AGENT
-# =========================================================
+
 
 class DQNAgent:
     def __init__(self, config: DQNConfig):
@@ -346,9 +343,8 @@ class DQNAgent:
         self.target_net.load_state_dict(payload["target_net"])
 
 
-# =========================================================
+
 # TRAIN / EVAL
-# =========================================================
 
 def evaluate_agent(agent: DQNAgent, config: DQNConfig, n_episodes=50):
     env = FeatureRewardWrapper(make_raw_env(), config)
@@ -478,10 +474,7 @@ def train_dqn(config: DQNConfig):
 
     return agent, logger, results
 
-
-# =========================================================
 #     HYPERPARAMETER ITERATION HELPER
-# =========================================================
 
 def run_reward_experiment(
     hole_penalty,
@@ -505,14 +498,12 @@ def run_reward_experiment(
     _, _, results = train_dqn(cfg)
     return results
 
-
-# =========================================================
 # MAIN
-# =========================================================
+
 
 if __name__ == "__main__":
     config = DQNConfig(
-        episodes=10000,
+        episodes=8000,
         batch_size=512,
         buffer_size=200_000,
         min_replay_size=10_000,
