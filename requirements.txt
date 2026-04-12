@@ -1,0 +1,5 @@
+numpy
+pygame
+matplotlib
+torch
+tetris-gymnasium
